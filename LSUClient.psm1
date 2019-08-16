@@ -262,8 +262,16 @@ function Test-LSUHistoryPath {
     Write-Verbose "LSU history file did not exist, created it: '$LSUClientHistoryPath'`r`n"
     $null = New-Item -Path $LSUClientHistoryPath -Force -ItemType File
     $initialArray = [System.Collections.ArrayList]::new()
-    Save-LSUHistory -history $initialArray
+    Save-LSUHistory -History $initialArray
   }
+}
+
+function Test-LSUCachePath {
+    param (
+        [string]$Filename
+    )
+    $path = Get-LSUCachePath -Filename $Filename
+    Test-Path -Path $path -PathType Leaf
 }
 
 function Get-LSUHistory {
@@ -283,34 +291,33 @@ function Get-LSUHistory {
 function Save-LSUHistory {
   [CmdletBinding()]
   Param (
-    [LenovoHistoryItem[]]$history
+    [LenovoHistoryItem[]]$History
   )
   # ensure history file exists
   Test-LSUHistoryPath
   # export new content to file
-  Export-Clixml -InputObject $history -Path $LSUClientHistoryPath
+  Export-CliXml -InputObject $History -Path $LSUClientHistoryPath
 }
 
 function Update-LSUHistory {
   Param(
-    [LenovoPackage]$model,
-    [bool]$isInstalled,
-    [string]$errorMessage = ""
+    [pscustomobject]$Package,
+    [string]$ErrorMessage = ""
   )
   $history = Get-LSUHistory
 
   $historyItem = [LenovoHistoryItem]::new()
-  $historyItem.ID = $model.ID
-  $historyItem.Title = $model.Title
-  $historyItem.Category = $model.Category
-  $historyItem.Version = $model.Version
-  $historyItem.IsInstalled = $isInstalled
-  $historyItem.ErrorMessage = $errorMessage
+  $historyItem.ID = $Package.ID
+  $historyItem.Title = $Package.Title
+  $historyItem.Category = $Package.Category
+  $historyItem.Version = $Package.Version
+  $historyItem.IsInstalled = $Package.IsInstalled
+  $historyItem.ErrorMessage = $ErrorMessage
   $historyItem.UpdatedAt = Get-Date
 
   # if the package doesn't exist in the file, then insert it
   # otherwise update the object with the new version
-  $existingItem = $history | Where-Object { $_.ID -eq $model.ID }
+  $existingItem = $history | Where-Object { $_.ID -eq $Package.ID }
   if ($null -eq $existingItem) {
     $history += $historyItem
   }
@@ -319,7 +326,67 @@ function Update-LSUHistory {
     $history[$index] = $historyItem
   }
 
-  Save-LSUHistory -history $history
+  Save-LSUHistory -History $history
+}
+
+function Get-LSUCachePath {
+    param (
+        [string]$Filename
+    )
+    return "$LSUClientPath/$Filename"
+}
+
+function Update-LSUCache {
+    param(
+        [string]$CacheFile,
+        [LenovoPackage[]]$Packages
+    )
+    # ensure cache file exists
+    if (-not (Test-LSUCachePath -Filename $Filename)) {
+        Write-Verbose "Cache file does not exist. Creating $Filename."
+        New-LSUCache -Filename $Filename
+    }
+    # export new content to file
+    $path = Get-LSUCachePath -Filename $CacheFile
+    Export-Clixml -InputObject $Packages -Path $path
+}
+
+function New-LSUCache {
+    param (
+        [string]$Filename
+    )
+    $filePath = Get-LSUCachePath -Filename $Filename
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        Write-Verbose "LSU cache file $Filename did not exist, created it: '$filePath'`r`n"
+        $null = New-Item -Path $filePath -Force -ItemType File
+    }
+}
+
+function Get-LSUCache {
+    param (
+        [string]$Filename
+    )
+    # ensure history file exists
+    if (-not (Test-LSUCachePath -Filename $Filename)) {
+        Write-Warning "Cache file does not exist"
+        return
+    }
+    Try {
+        # import data from file
+        $path = Get-LSUCachePath -Filename $Filename
+        Import-CliXml $path
+    }
+    Catch {
+        Write-Verbose "Error retrieving contents of cache file"
+    }
+}
+
+function Remove-LSUCache {
+    param (
+        [string]$Filename
+    )
+    $path = Get-LSUCachePath -Filename $Filename
+    Remove-Item $path
 }
 
 function Get-LSUpdate {
@@ -353,8 +420,18 @@ function Get-LSUpdate {
     [switch]$All,
     [switch]$FailUnsupportedDependencies,
     [ValidateScript( { try { [System.IO.File]::Create("$_").Dispose(); $true } catch { $false } })]
-    [string]$DebugLogFile
+    [string]$DebugLogFile,
+    [string]$CacheFile
   )
+
+  # if cache exists return the contents of the cache file
+  if ($CacheFile -ne $null) {
+    Write-Verbose "Returning package updates from cache"
+    $cachedPackages = Get-LSUCache -Filename $CacheFile
+    if ($null -ne $cachedPackages) {
+        return $cachedPackages
+    }
+  }
 
   if (-not (Test-RunningAsAdmin)) {
     Write-Warning "Unfortunately, this command produces most accurate results when run as an Administrator`r`nbecause some of the commands Lenovo uses to detect your computers hardware have to run as admin :("
@@ -442,10 +519,13 @@ function Get-LSUpdate {
   $webClient.Dispose()
 
   if ($All) {
+    if ($CacheFile -ne $null) { Update-LSUCache -CacheFile $CacheFile -Packages $packagesCollection}
     return $packagesCollection
   }
   else {
-    return $packagesCollection.Where{ $_.IsApplicable -and -not $_.IsInstalled }
+    $filteredPackages = $packagesCollection.Where{ $_.IsApplicable -and -not $_.IsInstalled }
+    if ($CacheFile -ne $null) { Update-LSUCache -CacheFile $CacheFile -Packages $filteredPackages}
+    return $filteredPackages
   }
 }
 
@@ -541,7 +621,7 @@ function Save-LSUpdate {
 function Expand-LSUpdate {
   Param (
     [Parameter( Position = 0, ValueFromPipeline = $true, Mandatory = $true )]
-    [LenovoPackage]$Package,
+    [pscustomobject]$Package,
     [Parameter( Mandatory = $true )]
     [ValidateScript( { Test-Path -LiteralPath $_ -PathType Container })]
     [string]$Path
@@ -572,13 +652,24 @@ function Install-LSUpdate {
 
   [CmdletBinding()]
   Param (
-    [Parameter( Position = 0, ValueFromPipeline = $true, Mandatory = $true )]
+    [Parameter( Position = 0, ValueFromPipeline = $true)]
     [pscustomobject]$Package,
+    [string]$PackageId,
+    [string]$CacheFile,
     [ValidateScript( { Test-Path -LiteralPath $_ -PathType Container })]
     [System.IO.DirectoryInfo]$Path = "$env:TEMP\LSUPackages"
   )
 
   process {
+    # if packageId and a cache file was provided then get the package from the cache
+    if ($null -ne $PackageId -and $null -ne $CacheFile) {
+        $cache = Get-LSUCache -Filename $CacheFile
+        $Package = $cache | Where-Object { $_.ID -eq $PackageId }
+        if ($null -eq $Package) {
+            Write-Error "$PackageId not found in cache $CacheFile"
+            return
+        }
+    }
     foreach ($PackageToProcess in $Package) {
       $PackageDirectory = Join-Path -Path $Path -ChildPath $PackageToProcess.id
       if (-not (Test-Path -LiteralPath (Join-Path -Path $PackageDirectory -ChildPath $PackageToProcess.Extracter.FileName) -PathType Leaf)) {
@@ -590,7 +681,6 @@ function Install-LSUpdate {
 
       Write-Verbose "Installing package $($PackageToProcess.ID) ...`r`n"
 
-      $isInstalled = $false;
       $errorMessage = "";
 
       if ($PackageToProcess.Category -eq 'BIOS UEFI') {
@@ -608,7 +698,7 @@ function Install-LSUpdate {
           }
           else {
             Write-Host "BIOS UPDATE SUCCESS: An immediate full power cycle / reboot is strongly recommended to allow the BIOS update to complete!`r`n"
-            $isInstalled = $true
+            $Package.IsInstalled = $true
           }
         }
         else {
@@ -629,7 +719,7 @@ function Install-LSUpdate {
               Write-Warning $errorMessage
             }
             else {
-              $isInstalled = $true
+              $Package.IsInstalled = $true
             }
           }
           'INF' {
@@ -641,7 +731,7 @@ function Install-LSUpdate {
               Write-Warning $errorMessage
             }
             else {
-              $isInstalled = $true
+              $Package.IsInstalled = $true
             }
           }
           default {
@@ -652,7 +742,7 @@ function Install-LSUpdate {
       }
 
       # update history file
-      AddOrUpdate-LSUHistory -model $package -isInstalled $isInstalled -errorMessage $errorMessage
+      Update-LSUHistory -Package $Package -ErrorMessage $errorMessage
     }
   }
 }
