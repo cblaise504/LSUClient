@@ -275,11 +275,19 @@ function Test-LSUCachePath {
 }
 
 function Get-LSUHistory {
+  param (
+    [string]$PackageId
+  )
   # ensure history file existsp
   Test-LSUHistoryPath
   Try {
     # import data from file
-    Import-CliXml $LSUClientHistoryPath
+    $data = Import-CliXml $LSUClientHistoryPath
+    if ($null -eq $PackageId) {
+      $data
+    } else {
+      $data | Where-Object { $_.ID -eq $PackageId }
+    }
   }
   Catch {
     # the file was malformed so just return an empty array
