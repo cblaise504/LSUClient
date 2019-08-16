@@ -275,7 +275,7 @@ function Test-LSUCachePath {
 }
 
 function Get-LSUHistory {
-  # ensure history file exists
+  # ensure history file existsp
   Test-LSUHistoryPath
   Try {
     # import data from file
@@ -338,7 +338,7 @@ function Get-LSUCachePath {
 
 function Update-LSUCache {
     param(
-        [string]$CacheFile,
+        [string]$Filename,
         [LenovoPackage[]]$Packages
     )
     # ensure cache file exists
@@ -347,7 +347,7 @@ function Update-LSUCache {
         New-LSUCache -Filename $Filename
     }
     # export new content to file
-    $path = Get-LSUCachePath -Filename $CacheFile
+    $path = Get-LSUCachePath -Filename $Filename
     Export-Clixml -InputObject $Packages -Path $path
 }
 
@@ -519,12 +519,12 @@ function Get-LSUpdate {
   $webClient.Dispose()
 
   if ($All) {
-    if ($CacheFile -ne $null) { Update-LSUCache -CacheFile $CacheFile -Packages $packagesCollection}
+    if ($CacheFile -ne $null) { Update-LSUCache -Filename $CacheFile -Packages $packagesCollection}
     return $packagesCollection
   }
   else {
     $filteredPackages = $packagesCollection.Where{ $_.IsApplicable -and -not $_.IsInstalled }
-    if ($CacheFile -ne $null) { Update-LSUCache -CacheFile $CacheFile -Packages $filteredPackages}
+    if ($CacheFile -ne $null) { Update-LSUCache -Filename $CacheFile -Packages $filteredPackages}
     return $filteredPackages
   }
 }
