@@ -368,7 +368,7 @@ function Get-LSUCache {
     )
     # ensure history file exists
     if (-not (Test-LSUCachePath -Filename $Filename)) {
-        Write-Warning "Cache file does not exist"
+        Write-Verbose "Cache file does not exist"
         return
     }
     Try {
