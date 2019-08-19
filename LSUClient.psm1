@@ -280,19 +280,12 @@ function Get-LSUHistory {
   )
   # ensure history file existsp
   Test-LSUHistoryPath
-  Try {
-    # import data from file
-    $data = Import-CliXml $LSUClientHistoryPath
-    if ($null -eq $PackageId) {
-      $data
-    } else {
-      $data | Where-Object { $_.ID -eq $PackageId }
-    }
-  }
-  Catch {
-    # the file was malformed so just return an empty array
-    Write-Verbose "Error retrieving contents of history file"
-    [System.Collections.ArrayList]::new()
+  # import data from file
+  $data = Import-CliXml $LSUClientHistoryPath
+  if ([string]::IsNullOrEmpty($PackageId)) {
+    return $data
+  } else {
+    return $data | Where-Object { $_.ID -eq $PackageId }
   }
 }
 
@@ -312,8 +305,7 @@ function Update-LSUHistory {
     [pscustomobject]$Package,
     [string]$ErrorMessage = ""
   )
-  $history = Get-LSUHistory
-
+  [LenovoHistoryItem[]]$history = Get-LSUHistory
   $historyItem = [LenovoHistoryItem]::new()
   $historyItem.ID = $Package.ID
   $historyItem.Title = $Package.Title
@@ -330,8 +322,12 @@ function Update-LSUHistory {
     $history += $historyItem
   }
   else {
-    $index = $history.IndexOf($existingItem)
-    $history[$index] = $historyItem
+    if ($history.length -eq 1) {
+      $history = $historyItem
+    } else {
+      $index = $history.IndexOf($existingItem)
+      $history[$index] = $historyItem
+    }
   }
 
   Save-LSUHistory -History $history
@@ -656,6 +652,12 @@ function Install-LSUpdate {
 
         .PARAMETER Path
         If you previously downloaded the Lenovo package to a custom directory, specify its path here so that the package can be found
+
+        .PARAMETER PackageId
+        Used in conjunction with param CacheFile.  Optionally pass a PackageId along with a cache file to pull a packager from the cache file
+
+        .PARAMETER CacheFile
+        Used in conjunction with param PackageId.  Optionally pass a PackageId along with a cache file to pull a packager from the cache file
     #>
 
   [CmdletBinding()]
